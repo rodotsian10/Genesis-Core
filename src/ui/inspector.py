@@ -25,14 +25,40 @@ class InspectorUI:
         if self.log_scroll < 0:
             self.log_scroll = 0
 
-    def handle_click(self, mouse_x, mouse_y, camera):
+    def handle_click(self, mouse_x, mouse_y, camera, metabolism_system=None):
         if mouse_x >= self.screen_width - self.panel_width:
             if hasattr(self, 'visible_log_rects'):
-                for rect, ent_id in self.visible_log_rects:
-                    if rect.collidepoint(mouse_x, mouse_y) and ent_id is not None:
-                        if hasattr(camera, 'set_target'):
-                            camera.set_target(ent_id, self.world)
-                            self.selected_entity = ent_id
+                for rect, entry_dict in self.visible_log_rects:
+                    if rect.collidepoint(mouse_x, mouse_y):
+                        ent_id = entry_dict.get('entity_id')
+                        # 1) 개체가 아직 살아있으면 카메라 추적 대상으로 지정
+                        if ent_id is not None and ent_id in self.world.entities:
+                            if hasattr(camera, 'set_target'):
+                                camera.set_target(ent_id, self.world)
+                                self.selected_entity = ent_id
+                        else:
+                            # 2) 개체가 죽었거나 좌표 정보가 있는 경우 카메라 화면 중심 이동 및 데스마커 부활
+                            self.selected_entity = None
+                            camera.clear_target()
+                            x = entry_dict.get('x')
+                            y = entry_dict.get('y')
+                            if x is not None and y is not None:
+                                camera.focus_on(x, y)
+                                # 데스마커 부활/생성 (metabolism_system)
+                                if metabolism_system is not None:
+                                    found = False
+                                    for marker in metabolism_system.death_markers:
+                                        if abs(marker['x'] - x) < 1.0 and abs(marker['y'] - y) < 1.0:
+                                            marker['timer'] = 5.0
+                                            found = True
+                                            break
+                                    if not found:
+                                        metabolism_system.death_markers.append({
+                                            'x': x,
+                                            'y': y,
+                                            'timer': 5.0,
+                                            'is_aquatic': entry_dict.get('is_aquatic', False)
+                                        })
                         return True
             return False
 
@@ -85,11 +111,23 @@ class InspectorUI:
                 pygame.draw.rect(screen, (200, 80, 80), pygame.Rect(margin, y_offset, (self.panel_width-30)*min(1.0, max(0, health.current_health)/health.max_health), 10))
                 y_offset += 25
                 
-                text_surf = self.font_body.render(f"에너지: {int(health.energy)}/{int(health.max_energy)}", True, (50, 100, 200))
+                text_surf = self.font_body.render(f"에너지: {int(health.energy)}/{int(health.max_energy)}", True, (50, 200, 100))
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 20
                 pygame.draw.rect(screen, (100, 100, 100), pygame.Rect(margin, y_offset, self.panel_width-30, 10))
-                pygame.draw.rect(screen, (50, 100, 200), pygame.Rect(margin, y_offset, (self.panel_width-30)*min(1.0, max(0, health.energy)/health.max_energy), 10))
+                pygame.draw.rect(screen, (50, 200, 100), pygame.Rect(margin, y_offset, (self.panel_width-30)*min(1.0, max(0, health.energy)/health.max_energy), 10))
+                y_offset += 25
+                
+                # 호흡 게이지
+                breath_val = getattr(health, 'breath', health.max_health)
+                max_breath_val = getattr(health, 'max_breath', health.max_health)
+                breath_pct = min(1.0, max(0, breath_val / max_breath_val))
+                breath_color = (100, 150, 255) if breath_pct > 0.4 else (255, 80, 80)
+                text_surf = self.font_body.render(f"호흡: {int(breath_val)}/{int(max_breath_val)}", True, breath_color)
+                screen.blit(text_surf, (margin, y_offset))
+                y_offset += 20
+                pygame.draw.rect(screen, (100, 100, 100), pygame.Rect(margin, y_offset, self.panel_width-30, 10))
+                pygame.draw.rect(screen, breath_color, pygame.Rect(margin, y_offset, int((self.panel_width-30)*breath_pct), 10))
                 y_offset += 30
                 
             if dna:
@@ -105,7 +143,26 @@ class InspectorUI:
                 if hasattr(dna, 'fur_gene'):
                     text_surf = self.font_body.render(f"털 밀도 (Fur): {dna.fur_gene:.2f}", True, (200, 200, 200))
                     screen.blit(text_surf, (margin, y_offset))
-                y_offset += 30
+                    y_offset += 20
+                if hasattr(dna, 'aquatic_gene'):
+                    aquatic_pct = int(dna.aquatic_gene * 100)
+                    aquatic_color = (80, 120, 255) if dna.aquatic_gene >= 0.5 else (180, 140, 80)
+                    text_surf = self.font_body.render(f"친수성: {aquatic_pct}%", True, aquatic_color)
+                    screen.blit(text_surf, (margin, y_offset))
+                    y_offset += 20
+                if hasattr(dna, 'curiosity_gene') and health:
+                    life_pct = health.age / max(health.lifespan, 1.0)
+                    if life_pct < 0.6:
+                        eff_cur = dna.curiosity_gene
+                    elif life_pct < 0.8:
+                        eff_cur = dna.curiosity_gene * (1.0 - (life_pct - 0.6) / 0.2)
+                    else:
+                        eff_cur = 0.0
+                    cur_color = (255, 200, 50) if eff_cur > 0.3 else (120, 120, 120)
+                    text_surf = self.font_body.render(f"호기심: {int(dna.curiosity_gene*100)}% (실:{int(eff_cur*100)}%)", True, cur_color)
+                    screen.blit(text_surf, (margin, y_offset))
+                    y_offset += 20
+                y_offset += 10
                 
             if pos:
                 text_surf = self.font_body.render(f"좌표: ({int(pos.x)}, {int(pos.y)})", True, (100, 100, 100))
@@ -140,9 +197,13 @@ class InspectorUI:
                 if isinstance(log_entry, dict):
                     msg = f"[{log_entry.get('time', '')}] {log_entry.get('msg', '')}"
                     ent_id = log_entry.get('entity_id')
+                    custom_color = log_entry.get('color')
+                    entry_dict = log_entry
                 else:
                     msg = log_entry
                     ent_id = None
+                    custom_color = None
+                    entry_dict = {"msg": log_entry}
                     
                 words = msg.split(' ')
                 current_line = ""
@@ -150,12 +211,12 @@ class InspectorUI:
                     test_line = current_line + word + " "
                     if self.font_body.size(test_line)[0] > self.panel_width - 30:
                         if current_line:
-                            wrapped_logs.append((current_line, ent_id))
+                            wrapped_logs.append((current_line, ent_id, custom_color, entry_dict))
                         current_line = word + " "
                     else:
                         current_line = test_line
                 if current_line:
-                    wrapped_logs.append((current_line, ent_id))
+                    wrapped_logs.append((current_line, ent_id, custom_color, entry_dict))
                     
             max_scroll = max(0, len(wrapped_logs) - lines_can_fit)
             if self.log_scroll > max_scroll:
@@ -168,9 +229,14 @@ class InspectorUI:
             
             self.visible_log_rects = []
             log_y = log_y_start + 40
-            for log_msg, ent_id in visible_logs:
-                color = (255, 255, 100) if ent_id is not None else (200, 200, 200)
+            for log_msg, ent_id, custom_color, entry_dict in visible_logs:
+                if custom_color:
+                    color = custom_color
+                elif ent_id is not None:
+                    color = (255, 255, 100)
+                else:
+                    color = (200, 200, 200)
                 log_surf = self.font_body.render(log_msg, True, color)
                 rect = screen.blit(log_surf, (margin, log_y))
-                self.visible_log_rects.append((rect, ent_id))
+                self.visible_log_rects.append((rect, entry_dict))
                 log_y += 20

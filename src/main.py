@@ -28,29 +28,54 @@ def main():
     
     survival_system = SurvivalSystem(world, world_map, world_width, world_height, max_population=500, logger=logger)
     metabolism_system = MetabolismSystem(world, world_map, logger=logger)
-    plant_system = PlantSpawnSystem(world, world_map, world_width, world_height, max_plants=600)
+    plant_system = PlantSpawnSystem(world, world_map, world_width, world_height, max_plants=2000)
     render_system = RenderSystem(world, screen, camera, world_width, world_height)
     
     ui = InspectorUI(world, width, height, ui_panel_width)
     ui.logger = logger
     
-    # 초기 스폰은 풀밭(GRASS)에만 안전하게 스폰
+    # 초기 스폰: 수생 생물은 물에, 육지 생물은 풀밭에 안전하게 스폰
     spawn_count = 0
     while spawn_count < 100:
-        rx, ry = random.uniform(0, world_width), random.uniform(0, world_height)
-        if world_map.get_biome_at(rx, ry) == 0: # GRASS
+        size_gene = random.uniform(0.5, 2.0)
+        speed_gene = random.uniform(0.5, 2.0)
+        metabolism_gene = random.uniform(0.8, 1.2)
+        
+        colors = [(138, 182, 102), (217, 160, 102), (200, 100, 100), (100, 150, 200), (220, 200, 100)]
+        color_gene = random.choice(colors)
+        fur_gene = random.uniform(0.0, 1.0)
+        aquatic_gene = random.uniform(0.0, 1.0)
+        curiosity_gene = random.uniform(0.0, 1.0)
+        
+        # 유전자에 따라 적절한 스폰 위치 탐색
+        is_aquatic = aquatic_gene >= 0.5
+        found_pos = False
+        attempts = 0
+        rx, ry = 0.0, 0.0
+        while not found_pos and attempts < 100:
+            rx = random.uniform(0, world_width)
+            ry = random.uniform(0, world_height)
+            biome = world_map.get_biome_at(rx, ry)
+            
+            if is_aquatic and biome in (2, 4):
+                found_pos = True
+            elif not is_aquatic and biome == 0: # GRASS
+                found_pos = True
+            attempts += 1
+            
+        if found_pos:
             entity = world.create_entity()
             world.add_component(entity, PositionComponent(rx, ry))
             
-            size_gene = random.uniform(0.5, 2.0)
-            speed_gene = random.uniform(0.5, 2.0)
-            metabolism_gene = random.uniform(0.8, 1.2)
-            
-            colors = [(138, 182, 102), (217, 160, 102), (200, 100, 100), (100, 150, 200), (220, 200, 100)]
-            color_gene = random.choice(colors)
-            fur_gene = 0.5
-            
-            world.add_component(entity, DNAComponent(size_gene, speed_gene, color_gene, metabolism_gene, fur_gene))
+            world.add_component(entity, DNAComponent(
+                size_gene=size_gene,
+                speed_gene=speed_gene,
+                color_gene=color_gene,
+                metabolism_gene=metabolism_gene,
+                fur_gene=fur_gene,
+                aquatic_gene=aquatic_gene,
+                curiosity_gene=curiosity_gene
+            ))
             actual_size = int(16 * size_gene)
             world.add_component(entity, RenderComponent(color_gene, actual_size))
             
@@ -72,7 +97,7 @@ def main():
                 running = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1: 
-                    ui.handle_click(event.pos[0], event.pos[1], camera)
+                    ui.handle_click(event.pos[0], event.pos[1], camera, metabolism_system)
                 elif event.button == 3: 
                     if event.pos[0] < width - ui_panel_width:
                         is_panning = True
@@ -99,12 +124,41 @@ def main():
         screen.fill((0, 0, 0)) # 배경 초기화
         world_map.render(screen, camera) # 타일맵(지형) 먼저 렌더링
         render_system.update() # 그 위에 생명체와 식량 렌더링
+        
+        # 사망 위치 마커 (데스 이펙트) 렌더링 - UI 패널 아래에 렌더링되도록 ui.render 전에 그림
+        for marker in metabolism_system.death_markers:
+            # 카메라 뷰 범위 및 메인 화면 영역 내에 있을 때만 렌더링
+            sx, sy = camera.apply(marker['x'], marker['y'])
+            if 0 <= sx < width - ui_panel_width and 0 <= sy < height:
+                # 남은 시간에 비례하여 알파(투명도) 채널 값 계산 (최대 5초)
+                alpha = int(max(0, min(255, (marker['timer'] / 5.0) * 255)))
+                # 수생 생물은 파란색 크로스, 육지 생물은 빨간색 크로스
+                color = (120, 160, 255) if marker['is_aquatic'] else (255, 110, 110)
+                size = int(6 * camera.zoom)
+                if size < 2: size = 2
+                
+                # 투명 그리기를 위한 임시 surface 사용
+                s = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+                pygame.draw.line(s, (*color, alpha), (size, 0), (size, size * 2), 2)
+                pygame.draw.line(s, (*color, alpha), (0, size), (size * 2, size), 2)
+                screen.blit(s, (sx - size, sy - size))
+                
         ui.render(screen) # 가장 위에 UI 렌더링
         
         font = pygame.font.SysFont('malgungothic', 16)
-        pop_count = len(world.get_entities_with(DNAComponent))
+        animals = world.get_entities_with(DNAComponent)
+        land_count = 0
+        sea_count = 0
+        for animal in animals:
+            dna = world.get_component(animal, DNAComponent)
+            if getattr(dna, 'aquatic_gene', 0.0) >= 0.5:
+                sea_count += 1
+            else:
+                land_count += 1
+                
+        pop_count = len(animals)
         food_count = len(world.get_entities_with(FoodComponent))
-        info_text = font.render(f"인구: {pop_count}/500 | 식량: {food_count}/600", True, (255, 255, 255))
+        info_text = font.render(f"인구: {pop_count}/500 (육지: {land_count} | 바다: {sea_count}) | 식량: {food_count}/2000", True, (255, 255, 255))
         screen.blit(info_text, (10, 10))
         
         pygame.display.flip()

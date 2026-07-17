@@ -41,6 +41,12 @@ class Camera:
     def apply_size(self, size):
         return max(1, int(size * self.zoom))
 
+    def focus_on(self, x, y):
+        self.clear_target()
+        self.camera_rect[0] = x - (self.width / (2 * self.zoom))
+        self.camera_rect[1] = y - (self.height / (2 * self.zoom))
+        self._keep_in_bounds()
+
     def screen_to_world(self, screen_x, screen_y):
         world_x = (screen_x / self.zoom) + self.camera_rect[0]
         world_y = (screen_y / self.zoom) + self.camera_rect[1]
