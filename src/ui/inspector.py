@@ -30,18 +30,14 @@ class InspectorUI:
                 for rect, entry_dict in self.visible_log_rects:
                     if rect.collidepoint(mouse_x, mouse_y):
                         ent_id = entry_dict.get('entity_id')
-                        # 1) 개체가 아직 살아있으면 카메라 추적 대상으로 지정
                         if ent_id is not None and ent_id in self.world.entities:
                             if hasattr(camera, 'set_target'):
                                 camera.set_target(ent_id, self.world)
                                 self.selected_entity = ent_id
                                 self.selected_dead_stat = None
                         else:
-                            # 2) 개체가 죽었거나 좌표 정보가 있는 경우
                             self.selected_entity = None
                             camera.clear_target()
-                            
-                            # 만약 로그에 저장된 사망 스탯 데이터가 있다면 인스펙터 창에 띄움
                             if "dead_stat" in entry_dict:
                                 self.selected_dead_stat = entry_dict["dead_stat"]
                             else:
@@ -51,7 +47,6 @@ class InspectorUI:
                             y = entry_dict.get('y')
                             if x is not None and y is not None:
                                 camera.focus_on(x, y)
-                                # 데스마커 부활/생성
                                 if metabolism_system is not None:
                                     found = False
                                     for marker in metabolism_system.death_markers:
@@ -109,7 +104,19 @@ class InspectorUI:
             pos = self.world.get_component(self.selected_entity, PositionComponent)
             
             if health:
-                text_surf = self.font_body.render(f"나이: {health.age:.1f} / {health.lifespan:.1f}", True, (150, 150, 150))
+                # 종족 판별
+                species = "육지 생물"
+                if dna:
+                    if getattr(dna, 'is_egg', False):
+                        species = "알"
+                    elif getattr(dna, 'is_bird', False):
+                        species = "조류"
+                    elif getattr(dna, 'is_amphibian', False):
+                        species = "양서류"
+                    elif getattr(dna, 'aquatic_gene', 0.0) >= 0.5:
+                        species = "바다 생물"
+                
+                text_surf = self.font_body.render(f"나이: {health.age:.1f} / {health.lifespan:.1f} ({species})", True, (150, 150, 150))
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 30
                 
@@ -215,7 +222,18 @@ class InspectorUI:
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 25
 
-            text_surf = self.font_body.render(f"최종 나이: {ds['age']:.1f} / {ds['lifespan']:.1f}", True, (150, 150, 150))
+            # 종족 판별
+            species = "육지 생물"
+            if ds.get('is_egg', False):
+                species = "알"
+            elif ds.get('is_bird', False):
+                species = "조류"
+            elif ds.get('is_amphibian', False):
+                species = "양서류"
+            elif ds.get('aquatic', 0.0) >= 0.5:
+                species = "바다 생물"
+
+            text_surf = self.font_body.render(f"최종 나이: {ds['age']:.1f} / {ds['lifespan']:.1f} ({species})", True, (150, 150, 150))
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 25
 
@@ -277,64 +295,73 @@ class InspectorUI:
             y_offset += 20
             text_surf = self.font_body.render("우클릭 & 드래그: 맵 이동", True, (150, 150, 150))
             screen.blit(text_surf, (margin, y_offset))
-
-
-        # 하단 로그 패널 (줄바꿈 및 스크롤 지원)
-        log_y_start = self.screen_height // 2 + 20
-        pygame.draw.line(screen, (139, 69, 19), (self.screen_width - self.panel_width, log_y_start), (self.screen_width, log_y_start), 3)
-        text_surf = self.font_title.render("월드 이벤트 로그", True, (200, 200, 200))
-        screen.blit(text_surf, (margin, log_y_start + 10))
+            y_offset += 20
+            
+        if self.selected_entity is not None and self.selected_entity in self.world.entities:
+            # 로그 뷰 영역 렌더링
+            pass
         
-        if hasattr(self, 'logger') and self.logger:
-            log_area_height = self.screen_height - log_y_start - 40
-            lines_can_fit = log_area_height // 20
+        # 로그 렌더링 패널 하단 영역 그리기
+        self.visible_log_rects = []
+        if self.logger:
+            log_start_y = self.screen_height - 240
+            pygame.draw.line(screen, (80, 80, 80), (self.screen_width - self.panel_width, log_start_y - 10), (self.screen_width, log_start_y - 10), 1)
             
-            wrapped_logs = []
-            for log_entry in self.logger.logs:
-                # Handle both new dict format and old string format
-                if isinstance(log_entry, dict):
-                    msg = f"[{log_entry.get('time', '')}] {log_entry.get('msg', '')}"
-                    ent_id = log_entry.get('entity_id')
-                    custom_color = log_entry.get('color')
-                    entry_dict = log_entry
-                else:
-                    msg = log_entry
-                    ent_id = None
-                    custom_color = None
-                    entry_dict = {"msg": log_entry}
-                    
-                words = msg.split(' ')
-                current_line = ""
-                for word in words:
-                    test_line = current_line + word + " "
-                    if self.font_body.size(test_line)[0] > self.panel_width - 30:
-                        if current_line:
-                            wrapped_logs.append((current_line, ent_id, custom_color, entry_dict))
-                        current_line = word + " "
-                    else:
-                        current_line = test_line
-                if current_line:
-                    wrapped_logs.append((current_line, ent_id, custom_color, entry_dict))
-                    
-            max_scroll = max(0, len(wrapped_logs) - lines_can_fit)
-            if self.log_scroll > max_scroll:
-                self.log_scroll = max_scroll
+            title_log = self.font_body.render("실시간 로그 기록", True, (220, 220, 120))
+            screen.blit(title_log, (margin, log_start_y))
+            log_start_y += 22
+            
+            visible_count = 10
+            logs_to_show = self.logger.logs[-visible_count - self.log_scroll:]
+            if len(self.logger.logs) > visible_count + self.log_scroll:
+                logs_to_show = logs_to_show[:visible_count]
                 
-            start_idx = max(0, len(wrapped_logs) - lines_can_fit - self.log_scroll)
-            end_idx = start_idx + lines_can_fit
-            
-            visible_logs = wrapped_logs[start_idx:end_idx]
-            
-            self.visible_log_rects = []
-            log_y = log_y_start + 40
-            for log_msg, ent_id, custom_color, entry_dict in visible_logs:
-                if custom_color:
-                    color = custom_color
-                elif ent_id is not None:
-                    color = (255, 255, 100)
-                else:
-                    color = (200, 200, 200)
-                log_surf = self.font_body.render(log_msg, True, color)
-                rect = screen.blit(log_surf, (margin, log_y))
-                self.visible_log_rects.append((rect, entry_dict))
-                log_y += 20
+            max_text_width = self.panel_width - 30
+
+            # 텍스트 자동 줄바꿈 헬퍼 함수
+            def wrap_text(text, font_obj, max_w):
+                words = text.split(' ')
+                lines = []
+                current_line = []
+                for word in words:
+                    # 단어 단위로 쪼개기
+                    test_line = ' '.join(current_line + [word])
+                    test_w, _ = font_obj.size(test_line)
+                    if test_w <= max_w:
+                        current_line.append(word)
+                    else:
+                        if current_line:
+                            lines.append(' '.join(current_line))
+                            current_line = [word]
+                        else:
+                            # 단어 자체가 가로폭보다 긴 비정상적인 경우 강제 분리
+                            lines.append(word)
+                            current_line = []
+                if current_line:
+                    lines.append(' '.join(current_line))
+                return lines
+
+            for entry in logs_to_show:
+                msg = entry.get("msg", "")
+                col = entry.get("color") or (200, 200, 200)
+                
+                # 래핑된 줄 목록 가져오기
+                wrapped_lines = wrap_text(msg, self.font_body, max_text_width)
+                
+                # 래핑된 여러 줄들을 연속해서 그립니다.
+                log_entry_rect = None
+                for line_idx, line in enumerate(wrapped_lines):
+                    txt = self.font_body.render(line, True, col)
+                    r_rect = txt.get_rect(topleft=(margin, log_start_y))
+                    
+                    # 마우스 클릭 판정은 첫 줄 또는 전체 영역 커버용으로 셋업
+                    if log_entry_rect is None:
+                        log_entry_rect = pygame.Rect(margin, log_start_y, max_text_width, 18 * len(wrapped_lines))
+                    
+                    screen.blit(txt, (margin, log_start_y))
+                    log_start_y += 18
+                
+                if log_entry_rect is not None:
+                    self.visible_log_rects.append((log_entry_rect, entry))
+                # 항목 간 여백 추가
+                log_start_y += 2
