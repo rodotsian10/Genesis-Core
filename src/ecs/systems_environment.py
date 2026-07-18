@@ -47,15 +47,13 @@ class PlantSpawnSystem:
             
             current_plants = self.world.get_entities_with(FoodComponent)
             if len(current_plants) < self.max_plants:
-                for _ in range(3): 
+                for _ in range(6): 
                     x = random.uniform(0, self.width)
                     y = random.uniform(0, self.height)
                     
                     biome = self.world_map.get_biome_at(x, y)
                     is_seaweed = False
                     if biome in (2, 4): # WATER or DEEP_WATER
-                        if random.random() > 0.5: # 50% 확률로 해조류 스폰
-                            continue
                         is_seaweed = True
                     elif biome == 1 or biome == 3: # DESERT or SNOW
                         if random.random() > 0.15: # 사막과 설원에는 15% 확률로만 자라남 (매우 희귀)
@@ -67,4 +65,6 @@ class PlantSpawnSystem:
                         self.world.add_component(entity, RenderComponent((50, 160, 120), 5))
                     else:
                         self.world.add_component(entity, RenderComponent((40, 150, 60), 6))
-                    self.world.add_component(entity, FoodComponent(energy_value=40.0, is_seaweed=is_seaweed))
+                    
+                    energy_val = 60.0 if is_seaweed else 40.0
+                    self.world.add_component(entity, FoodComponent(energy_value=energy_val, is_seaweed=is_seaweed))

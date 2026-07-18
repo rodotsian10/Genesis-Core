@@ -143,6 +143,9 @@ class InspectorUI:
                 # 돌연변이 상태 & 세대 정보 출력
                 gen_val = getattr(dna, 'generation', 1)
                 is_mut = getattr(dna, 'is_mutated', False)
+                mut_feats = getattr(dna, 'mutated_features', {})
+                if not isinstance(mut_feats, dict):
+                    mut_feats = {}
                 mut_str = "돌연변이 계열 (위험)" if is_mut else "일반 계열"
                 mut_color = (255, 100, 100) if is_mut else (100, 200, 255)
                 
@@ -150,23 +153,36 @@ class InspectorUI:
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 25
                 
-                text_surf = self.font_body.render(f"크기 (Size): {dna.size_gene:.2f}", True, (150, 150, 150))
+                # 각 유전자별 돌연변이 여부에 따라 빨간색 텍스트와 변화 수치 적용
+                size_color = (255, 80, 80) if "크기" in mut_feats else (150, 150, 150)
+                size_suffix = f" ({mut_feats['크기']})" if "크기" in mut_feats else ""
+                text_surf = self.font_body.render(f"크기 (Size): {dna.size_gene:.2f}{size_suffix}", True, size_color)
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 20
-                text_surf = self.font_body.render(f"속도 (Speed): {dna.speed_gene:.2f}", True, (150, 150, 150))
+                
+                speed_color = (255, 80, 80) if "속도" in mut_feats else (150, 150, 150)
+                speed_suffix = f" ({mut_feats['속도']})" if "속도" in mut_feats else ""
+                text_surf = self.font_body.render(f"속도 (Speed): {dna.speed_gene:.2f}{speed_suffix}", True, speed_color)
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 20
-                text_surf = self.font_body.render(f"대사량 (Meta): {dna.metabolism_gene:.2f}", True, (150, 150, 150))
+                
+                meta_color = (255, 80, 80) if "대사량" in mut_feats else (150, 150, 150)
+                meta_suffix = f" ({mut_feats['대사량']})" if "대사량" in mut_feats else ""
+                text_surf = self.font_body.render(f"대사량 (Meta): {dna.metabolism_gene:.2f}{meta_suffix}", True, meta_color)
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 20
+                
                 if hasattr(dna, 'fur_gene'):
-                    text_surf = self.font_body.render(f"털 밀도 (Fur): {dna.fur_gene:.2f}", True, (200, 200, 200))
+                    fur_color = (255, 100, 100) if "털" in mut_feats else (200, 200, 200)
+                    fur_suffix = f" ({mut_feats['털']})" if "털" in mut_feats else ""
+                    text_surf = self.font_body.render(f"털 밀도 (Fur): {dna.fur_gene:.2f}{fur_suffix}", True, fur_color)
                     screen.blit(text_surf, (margin, y_offset))
                     y_offset += 20
                 if hasattr(dna, 'aquatic_gene'):
                     aquatic_pct = int(dna.aquatic_gene * 100)
-                    aquatic_color = (80, 120, 255) if dna.aquatic_gene >= 0.5 else (180, 140, 80)
-                    text_surf = self.font_body.render(f"친수성: {aquatic_pct}%", True, aquatic_color)
+                    aq_color = (255, 100, 100) if "친수성" in mut_feats else ((80, 120, 255) if dna.aquatic_gene >= 0.5 else (180, 140, 80))
+                    aq_suffix = f" ({mut_feats['친수성']})" if "친수성" in mut_feats else ""
+                    text_surf = self.font_body.render(f"친수성: {aquatic_pct}%{aq_suffix}", True, aq_color)
                     screen.blit(text_surf, (margin, y_offset))
                     y_offset += 20
                 if hasattr(dna, 'curiosity_gene') and health:
@@ -177,8 +193,9 @@ class InspectorUI:
                         eff_cur = dna.curiosity_gene * (1.0 - (life_pct - 0.6) / 0.2)
                     else:
                         eff_cur = 0.0
-                    cur_color = (255, 200, 50) if eff_cur > 0.3 else (120, 120, 120)
-                    text_surf = self.font_body.render(f"호기심: {int(dna.curiosity_gene*100)}% (실:{int(eff_cur*100)}%)", True, cur_color)
+                    cur_color = (255, 100, 100) if "호기심" in mut_feats else ((255, 200, 50) if eff_cur > 0.3 else (120, 120, 120))
+                    cur_suffix = f" ({mut_feats['호기심']})" if "호기심" in mut_feats else ""
+                    text_surf = self.font_body.render(f"호기심: {int(dna.curiosity_gene*100)}% (실:{int(eff_cur*100)}%){cur_suffix}", True, cur_color)
                     screen.blit(text_surf, (margin, y_offset))
                     y_offset += 20
                 y_offset += 10
@@ -202,29 +219,49 @@ class InspectorUI:
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 25
 
+            ds_mut_feats = ds.get('mutated_features', {})
+            if not isinstance(ds_mut_feats, dict):
+                ds_mut_feats = {}
             mut_str = "돌연변이 계열 (위험)" if ds['is_mutated'] else "일반 계열"
             mut_color = (255, 100, 100) if ds['is_mutated'] else (100, 200, 255)
             text_surf = self.font_body.render(f"유전: {mut_str} ({ds['generation']}세대)", True, mut_color)
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 30
 
-            text_surf = self.font_body.render(f"크기 (Size): {ds['size']:.2f}", True, (150, 150, 150))
+            size_color = (255, 80, 80) if "크기" in ds_mut_feats else (150, 150, 150)
+            size_suffix = f" ({ds_mut_feats['크기']})" if "크기" in ds_mut_feats else ""
+            text_surf = self.font_body.render(f"크기 (Size): {ds['size']:.2f}{size_suffix}", True, size_color)
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 20
-            text_surf = self.font_body.render(f"속도 (Speed): {ds['speed']:.2f}", True, (150, 150, 150))
+            
+            speed_color = (255, 80, 80) if "속도" in ds_mut_feats else (150, 150, 150)
+            speed_suffix = f" ({ds_mut_feats['속도']})" if "속도" in ds_mut_feats else ""
+            text_surf = self.font_body.render(f"속도 (Speed): {ds['speed']:.2f}{speed_suffix}", True, speed_color)
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 20
-            text_surf = self.font_body.render(f"대사량 (Meta): {ds['meta']:.2f}", True, (150, 150, 150))
+            
+            meta_color = (255, 80, 80) if "대사량" in ds_mut_feats else (150, 150, 150)
+            meta_suffix = f" ({ds_mut_feats['대사량']})" if "대사량" in ds_mut_feats else ""
+            text_surf = self.font_body.render(f"대사량 (Meta): {ds['meta']:.2f}{meta_suffix}", True, meta_color)
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 20
-            text_surf = self.font_body.render(f"털 밀도 (Fur): {ds['fur']:.2f}", True, (200, 200, 200))
+            
+            fur_color = (255, 100, 100) if "털" in ds_mut_feats else (200, 200, 200)
+            fur_suffix = f" ({ds_mut_feats['털']})" if "털" in ds_mut_feats else ""
+            text_surf = self.font_body.render(f"털 밀도 (Fur): {ds['fur']:.2f}{fur_suffix}", True, fur_color)
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 20
+            
             aquatic_pct = int(ds['aquatic'] * 100)
-            text_surf = self.font_body.render(f"친수성: {aquatic_pct}%", True, (80, 120, 255) if ds['aquatic'] >= 0.5 else (180, 140, 80))
+            aq_color = (255, 100, 100) if "친수성" in ds_mut_feats else ((80, 120, 255) if ds['aquatic'] >= 0.5 else (180, 140, 80))
+            aq_suffix = f" ({ds_mut_feats['친수성']})" if "친수성" in ds_mut_feats else ""
+            text_surf = self.font_body.render(f"친수성: {aquatic_pct}%{aq_suffix}", True, aq_color)
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 20
-            text_surf = self.font_body.render(f"호기심: {int(ds['curiosity']*100)}%", True, (255, 200, 50))
+            
+            cur_color = (255, 100, 100) if "호기심" in ds_mut_feats else (255, 200, 50)
+            cur_suffix = f" ({ds_mut_feats['호기심']})" if "호기심" in ds_mut_feats else ""
+            text_surf = self.font_body.render(f"호기심: {int(ds['curiosity']*100)}%{cur_suffix}", True, cur_color)
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 20
                 

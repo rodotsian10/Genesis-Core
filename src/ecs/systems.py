@@ -214,8 +214,39 @@ class SurvivalSystem:
                         dead_foods.add(nearest_food)
                         pos.x, pos.y = f_pos.x, f_pos.y
                     else:
-                        pos.x += (dx / length) * move_dist
-                        pos.y += (dy / length) * move_dist
+                        # [우회 스티어링 시스템]
+                        # 직선 경로 상에 위험 지형(물 등)이 감지되면, 주변 안전한 각도를 찾아 스티어링 조향 벡터를 꺾습니다.
+                        target_dx = dx / length
+                        target_dy = dy / length
+                        
+                        # 직선 60px 전방 예측 검사
+                        check_x = pos.x + target_dx * 60.0
+                        check_y = pos.y + target_dy * 60.0
+                        future_biome = self.world_map.get_biome_at(check_x, check_y)
+                        
+                        # 안전하지 못한 지형이라면 우회 방향 탐색
+                        if not is_safe_biome(future_biome):
+                            best_steer_x, best_steer_y = target_dx, target_dy
+                            best_score = -9999.0
+                            # 주변 16방향 스캔하여 가장 안전하면서 목표와 가장 가까운 조향각 탐색
+                            for i in range(16):
+                                angle = math.atan2(dy, dx) + (i - 8) * (math.pi / 8.0)
+                                sx = math.cos(angle)
+                                sy = math.sin(angle)
+                                # 50px 앞 지점 검증
+                                tx = pos.x + sx * 50.0
+                                ty = pos.y + sy * 50.0
+                                tb = self.world_map.get_biome_at(tx, ty)
+                                if is_safe_biome(tb):
+                                    # 목표 방향과의 내적(유사도)을 계산하여 가장 최적의 육지 방향 채택
+                                    dot_product = sx * target_dx + sy * target_dy
+                                    if dot_product > best_score:
+                                        best_score = dot_product
+                                        best_steer_x, best_steer_y = sx, sy
+                            target_dx, target_dy = best_steer_x, best_steer_y
+                        
+                        pos.x += target_dx * move_dist
+                        pos.y += target_dy * move_dist
                 action_taken = True
 
             # 3순위: 번식 (짝짓기) - 러스트 가속 탐색
@@ -326,10 +357,36 @@ class SurvivalSystem:
                                 }
                         action_taken = True
                     elif wants_to_mate or desperate_mating_mode:
-                        pos.x += (dx / length) * speed * dt
-                        pos.y += (dy / length) * speed * dt
+                        target_dx = dx / length
+                        target_dy = dy / length
                         
-                        # desperate 모드가 아닐 때만 물 충돌 시 튕겨 나오기 처리 (desperate 모드는 육지/바다 경계 돌파 직진)
+                        # desperate 모드가 아닐 때만 지형 우회 스티어링 적용
+                        if not desperate_mating_mode:
+                            check_x = pos.x + target_dx * 60.0
+                            check_y = pos.y + target_dy * 60.0
+                            future_biome = self.world_map.get_biome_at(check_x, check_y)
+                            
+                            if not is_safe_biome(future_biome):
+                                best_steer_x, best_steer_y = target_dx, target_dy
+                                best_score = -9999.0
+                                for i in range(16):
+                                    angle = math.atan2(dy, dx) + (i - 8) * (math.pi / 8.0)
+                                    sx = math.cos(angle)
+                                    sy = math.sin(angle)
+                                    tx = pos.x + sx * 50.0
+                                    ty = pos.y + sy * 50.0
+                                    tb = self.world_map.get_biome_at(tx, ty)
+                                    if is_safe_biome(tb):
+                                        dot_product = sx * target_dx + sy * target_dy
+                                        if dot_product > best_score:
+                                            best_score = dot_product
+                                            best_steer_x, best_steer_y = sx, sy
+                                target_dx, target_dy = best_steer_x, best_steer_y
+                        
+                        pos.x += target_dx * speed * dt
+                        pos.y += target_dy * speed * dt
+                        
+                        # desperate 모드가 아닐 때만 물 충돌 시 튕겨 나오기 처리
                         if not desperate_mating_mode and self.world_map.get_biome_at(pos.x, pos.y) in (2, 4):
                             pos.x, pos.y = prev_x, prev_y
                             best_angle = pos.wander_angle + math.pi
@@ -422,17 +479,16 @@ class SurvivalSystem:
             new_gen = max(gen1, gen2) + 1
 
             has_mutated = False
+            mutated_features = {} # {이름: 변화량_텍스트} 형식
             
             # 대돌연변이 판정 (10% 확률로 발생)
+            # 대돌연변이가 당첨되면, 6가지 유전자 중 1~2개를 무작위로 선택하여 극단적인 변화를 줍니다.
+            macro_targets = []
             if random.random() < 0.1:
                 has_mutated = True
+                possible_traits = ["크기", "속도", "대사량", "털", "친수성", "호기심"]
+                macro_targets = random.sample(possible_traits, random.randint(1, 2))
             
-            def mutate(val, apply_macro):
-                if apply_macro:
-                    return val * random.uniform(0.5, 1.5)
-                factor = random.uniform(0.85, 1.15)
-                return val * factor
-                
             base_size = random.choice([dna1.size_gene, dna2.size_gene])
             base_speed = random.choice([dna1.speed_gene, dna2.speed_gene])
             base_meta = random.choice([dna1.metabolism_gene, dna2.metabolism_gene])
@@ -440,29 +496,67 @@ class SurvivalSystem:
             base_fur = random.choice([getattr(dna1, 'fur_gene', 0.5), getattr(dna2, 'fur_gene', 0.5)])
             base_aquatic = random.choice([getattr(dna1, 'aquatic_gene', 0.0), getattr(dna2, 'aquatic_gene', 0.0)])
             base_curiosity = random.choice([getattr(dna1, 'curiosity_gene', 0.5), getattr(dna2, 'curiosity_gene', 0.5)])
+
+            # 1) 크기 유전자
+            if "크기" in macro_targets:
+                factor = random.uniform(0.5, 1.5)
+                diff = factor - 1.0
+                prefix = "+" if diff >= 0 else ""
+                mutated_features["크기"] = f"{prefix}{diff*100:+.0f}%"
+                new_size = base_size * factor
+            else:
+                new_size = base_size * random.uniform(0.85, 1.15)
+
+            # 2) 속도 유전자
+            if "속도" in macro_targets:
+                factor = random.uniform(0.5, 1.5)
+                diff = factor - 1.0
+                prefix = "+" if diff >= 0 else ""
+                mutated_features["속도"] = f"{prefix}{diff*100:+.0f}%"
+                new_speed = base_speed * factor
+            else:
+                new_speed = base_speed * random.uniform(0.85, 1.15)
+
+            # 3) 대사량 유전자
+            if "대사량" in macro_targets:
+                factor = random.uniform(0.5, 1.5)
+                diff = factor - 1.0
+                prefix = "+" if diff >= 0 else ""
+                mutated_features["대사량"] = f"{prefix}{diff*100:+.0f}%"
+                new_meta = base_meta * factor
+            else:
+                new_meta = base_meta * random.uniform(0.85, 1.15)
             
-            # 대돌연변이가 당첨되었으면 수치 변화 폭을 대돌연변이 배율(0.5~1.5)로 적용합니다.
-            new_size = mutate(base_size, has_mutated)
-            new_speed = mutate(base_speed, has_mutated)
-            new_meta = mutate(base_meta, has_mutated)
-            
-            # 털 밀도 돌연변이
-            fur_mutation = random.uniform(-0.25, 0.25)
+            # 4) 털 밀도 유전자
+            if "털" in macro_targets:
+                # 대돌연변이 시에는 크게 변동 (±0.4)
+                fur_mutation = random.uniform(-0.4, 0.4)
+                prefix = "+" if fur_mutation >= 0 else ""
+                mutated_features["털"] = f"{prefix}{fur_mutation:+.2f}"
+            else:
+                # 일반 변이 (±0.15)
+                fur_mutation = random.uniform(-0.15, 0.15)
             new_fur = max(0.0, min(1.0, base_fur + fur_mutation))
             
-            # 친수성 돌연변이
-            if random.random() < 0.2:
-                aq_mut = random.uniform(-0.15, 0.15)
+            # 5) 친수성 유전자
+            if "친수성" in macro_targets:
+                aq_mut = random.uniform(-0.35, 0.35)
+                prefix = "+" if aq_mut >= 0 else ""
+                mutated_features["친수성"] = f"{prefix}{aq_mut*100:+.0f}%"
                 new_aquatic = max(0.0, min(1.0, base_aquatic + aq_mut))
             else:
-                new_aquatic = base_aquatic
+                aq_mut = random.uniform(-0.1, 0.1) if random.random() < 0.2 else 0.0
+                new_aquatic = max(0.0, min(1.0, base_aquatic + aq_mut))
             
-            # 호기심 돌연변이
-            if random.random() < 0.2:
-                cur_mut = random.uniform(-0.15, 0.15)
+            # 6) 호기심 유전자
+            if "호기심" in macro_targets:
+                cur_mut = random.uniform(-0.35, 0.35)
+                prefix = "+" if cur_mut >= 0 else ""
+                mutated_features["호기심"] = f"{prefix}{cur_mut*100:+.0f}%"
                 new_curiosity = max(0.0, min(1.0, base_curiosity + cur_mut))
             else:
-                new_curiosity = base_curiosity
+                cur_mut = random.uniform(-0.1, 0.1) if random.random() < 0.2 else 0.0
+                new_curiosity = max(0.0, min(1.0, base_curiosity + cur_mut))
             
             r, g, b = base_color
             new_r = max(0, min(255, r + random.randint(-15, 15)))
@@ -473,6 +567,30 @@ class SurvivalSystem:
             # 부모의 돌연변이 상태 획득
             p1_is_mut = getattr(dna1, 'is_mutated', False)
             p2_is_mut = getattr(dna2, 'is_mutated', False)
+            
+            # 부모로부터 돌연변이 상태가 상속될지 결정 (20% 확률)
+            parent_mut_inherited = False
+            if p1_is_mut or p2_is_mut:
+                if random.random() < 0.2:
+                    parent_mut_inherited = True
+            
+            # 최종 자손 돌연변이 판정: 이번에 돌연변이가 발생했거나, 부모의 돌연변이가 상속된 경우
+            child_is_mutated = has_mutated or parent_mut_inherited
+            
+            # 부모의 돌연변이 특징 상속
+            inherited_features = {}
+            if parent_mut_inherited:
+                # 부모 특징 딕셔너리 병합
+                p1_feats = getattr(dna1, 'mutated_features', {})
+                p2_feats = getattr(dna2, 'mutated_features', {})
+                if isinstance(p1_feats, dict):
+                    inherited_features.update(p1_feats)
+                if isinstance(p2_feats, dict):
+                    inherited_features.update(p2_feats)
+            
+            final_mutated_features = {}
+            final_mutated_features.update(inherited_features)
+            final_mutated_features.update(mutated_features)
             
             # 유전병 판정:
             # 1. 부모 둘 다 돌연변이 세대(is_mutated==True)인 경우
@@ -488,17 +606,15 @@ class SurvivalSystem:
             
             if is_genetic_disease_death:
                 if self.logger:
-                    # 유전병 사망 로그에 클릭하여 상세 스탯 확인이 가능하도록 스탯 정보가 담긴 dictionary 형태로 추가
                     disease_msg = f"[유전사망] ID:{entity} ({disease_reason}, 크기:{new_size:.1f}/속도:{new_speed:.1f}/세대:{new_gen})"
                     self.logger.add_log(
                         disease_msg,
-                        entity_id=None, # 죽었으므로 target 추적은 못하게 None
+                        entity_id=None,
                         color=(255, 50, 50),
                         x=new_x,
                         y=new_y,
                         is_aquatic=child_aquatic
                     )
-                    # 로그의 스탯 정보 추가 저장
                     self.logger.logs[-1]["dead_stat"] = {
                         "id": entity,
                         "age": 0.0,
@@ -513,9 +629,9 @@ class SurvivalSystem:
                         "curiosity": new_curiosity,
                         "generation": new_gen,
                         "is_mutated": True,
+                        "mutated_features": final_mutated_features,
                         "death_cause": f"유전병 즉사 ({disease_reason})"
                     }
-                # 엔티티 컴포넌트를 등록하지 않고 즉시 사망 처리 (스폰 생략)
                 continue
 
             # 출산 성공 로그
@@ -527,10 +643,6 @@ class SurvivalSystem:
                 
             self.world.add_component(entity, PositionComponent(new_x, new_y))
             
-            # 자손에게 돌연변이 상태 상속 또는 신규 돌연변이 마킹
-            # 돌연변이 부모에게서 태어났거나, 이번 출산 때 돌연변이가 발생했다면 돌연변이 세대(is_mutated = True)로 간주
-            child_is_mutated = p1_is_mut or p2_is_mut or has_mutated
-            
             self.world.add_component(entity, DNAComponent(
                 size_gene=new_size,
                 speed_gene=new_speed,
@@ -540,16 +652,16 @@ class SurvivalSystem:
                 aquatic_gene=new_aquatic,
                 curiosity_gene=new_curiosity,
                 generation=new_gen,
-                is_mutated=child_is_mutated
+                is_mutated=child_is_mutated,
+                mutated_features=final_mutated_features
             ))
             self.world.add_component(entity, RenderComponent(new_color, int(16 * new_size)))
             
-            # Live Fast Die Young: 빠르고 클수록 수명 단축
+            # Live Fast Die Young
             base_lifespan = random.uniform(150, 300)
             life_factor = max(0.5, min(3.0, (new_speed * 0.7 + new_size * 0.3) / 1.25))
             new_lifespan = base_lifespan / life_factor
             
-            # 에너지를 반으로 깎는 것은 롤백하고 정상 100 max로 설정
             max_energy = 100.0
             
             self.world.add_component(entity, HealthComponent(
