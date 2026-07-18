@@ -36,6 +36,10 @@ class DNAComponent:
     fur_gene: float = 0.5
     aquatic_gene: float = 0.0   # 0.0=완전 육지, 1.0=완전 수생
     curiosity_gene: float = 0.5 # 0.0=겁쟁이, 1.0=무모한 탐험가
+    generation: int = 1         # 개체 세대 계보
+    is_mutated: bool = False    # 돌연변이 여부 표시
+
+
 
 @dataclass
 class FoodComponent:

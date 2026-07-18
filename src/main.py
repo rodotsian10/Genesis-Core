@@ -74,7 +74,8 @@ def main():
                 metabolism_gene=metabolism_gene,
                 fur_gene=fur_gene,
                 aquatic_gene=aquatic_gene,
-                curiosity_gene=curiosity_gene
+                curiosity_gene=curiosity_gene,
+                generation=1
             ))
             actual_size = int(16 * size_gene)
             world.add_component(entity, RenderComponent(color_gene, actual_size))

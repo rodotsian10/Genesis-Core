@@ -9,6 +9,7 @@ class InspectorUI:
         self.screen_height = screen_height
         self.panel_width = panel_width
         self.selected_entity = None
+        self.selected_dead_stat = None # 사망 개체 상세 정보 저장용
         pygame.font.init()
         try:
             self.font_title = pygame.font.SysFont('malgungothic', 24, bold=True)
@@ -19,8 +20,6 @@ class InspectorUI:
         self.log_scroll = 0
 
     def handle_scroll(self, dy):
-        # dy는 마우스 휠 위로 굴릴 때 1, 아래로 굴릴 때 -1
-        # 스크롤을 올리면(양수) 과거 로그(위쪽)를 본다 -> log_scroll 증가
         self.log_scroll += int(dy) * 3
         if self.log_scroll < 0:
             self.log_scroll = 0
@@ -36,15 +35,23 @@ class InspectorUI:
                             if hasattr(camera, 'set_target'):
                                 camera.set_target(ent_id, self.world)
                                 self.selected_entity = ent_id
+                                self.selected_dead_stat = None
                         else:
-                            # 2) 개체가 죽었거나 좌표 정보가 있는 경우 카메라 화면 중심 이동 및 데스마커 부활
+                            # 2) 개체가 죽었거나 좌표 정보가 있는 경우
                             self.selected_entity = None
                             camera.clear_target()
+                            
+                            # 만약 로그에 저장된 사망 스탯 데이터가 있다면 인스펙터 창에 띄움
+                            if "dead_stat" in entry_dict:
+                                self.selected_dead_stat = entry_dict["dead_stat"]
+                            else:
+                                self.selected_dead_stat = None
+                                
                             x = entry_dict.get('x')
                             y = entry_dict.get('y')
                             if x is not None and y is not None:
                                 camera.focus_on(x, y)
-                                # 데스마커 부활/생성 (metabolism_system)
+                                # 데스마커 부활/생성
                                 if metabolism_system is not None:
                                     found = False
                                     for marker in metabolism_system.death_markers:
@@ -73,12 +80,14 @@ class InspectorUI:
                 
                 if math.hypot(pos.x - world_x, pos.y - world_y) < render.size:
                     self.selected_entity = entity
+                    self.selected_dead_stat = None
                     camera.set_target(entity, self.world)
                     clicked = True
                     break
                     
             if not clicked:
                 self.selected_entity = None
+                self.selected_dead_stat = None
                 camera.clear_target()
         return False
 
@@ -108,14 +117,14 @@ class InspectorUI:
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 20
                 pygame.draw.rect(screen, (100, 100, 100), pygame.Rect(margin, y_offset, self.panel_width-30, 10))
-                pygame.draw.rect(screen, (200, 80, 80), pygame.Rect(margin, y_offset, (self.panel_width-30)*min(1.0, max(0, health.current_health)/health.max_health), 10))
+                pygame.draw.rect(screen, (200, 80, 80), pygame.Rect(margin, y_offset, int((self.panel_width-30)*min(1.0, max(0, health.current_health)/health.max_health)), 10))
                 y_offset += 25
                 
                 text_surf = self.font_body.render(f"에너지: {int(health.energy)}/{int(health.max_energy)}", True, (50, 200, 100))
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 20
                 pygame.draw.rect(screen, (100, 100, 100), pygame.Rect(margin, y_offset, self.panel_width-30, 10))
-                pygame.draw.rect(screen, (50, 200, 100), pygame.Rect(margin, y_offset, (self.panel_width-30)*min(1.0, max(0, health.energy)/health.max_energy), 10))
+                pygame.draw.rect(screen, (50, 200, 100), pygame.Rect(margin, y_offset, int((self.panel_width-30)*min(1.0, max(0, health.energy)/health.max_energy)), 10))
                 y_offset += 25
                 
                 # 호흡 게이지
@@ -131,6 +140,16 @@ class InspectorUI:
                 y_offset += 30
                 
             if dna:
+                # 돌연변이 상태 & 세대 정보 출력
+                gen_val = getattr(dna, 'generation', 1)
+                is_mut = getattr(dna, 'is_mutated', False)
+                mut_str = "돌연변이 계열 (위험)" if is_mut else "일반 계열"
+                mut_color = (255, 100, 100) if is_mut else (100, 200, 255)
+                
+                text_surf = self.font_body.render(f"유전: {mut_str} ({gen_val}세대)", True, mut_color)
+                screen.blit(text_surf, (margin, y_offset))
+                y_offset += 25
+                
                 text_surf = self.font_body.render(f"크기 (Size): {dna.size_gene:.2f}", True, (150, 150, 150))
                 screen.blit(text_surf, (margin, y_offset))
                 y_offset += 20
@@ -167,12 +186,53 @@ class InspectorUI:
             if pos:
                 text_surf = self.font_body.render(f"좌표: ({int(pos.x)}, {int(pos.y)})", True, (100, 100, 100))
                 screen.blit(text_surf, (margin, y_offset))
+
+        elif self.selected_dead_stat is not None:
+            # 사망 개체 기록 디스플레이
+            ds = self.selected_dead_stat
+            text_surf = self.font_title.render(f"사망 정보 (ID: {ds['id']})", True, (255, 100, 100))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 40
+
+            text_surf = self.font_body.render(f"사인: {ds['death_cause']}", True, (255, 80, 80))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 25
+
+            text_surf = self.font_body.render(f"최종 나이: {ds['age']:.1f} / {ds['lifespan']:.1f}", True, (150, 150, 150))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 25
+
+            mut_str = "돌연변이 계열 (위험)" if ds['is_mutated'] else "일반 계열"
+            mut_color = (255, 100, 100) if ds['is_mutated'] else (100, 200, 255)
+            text_surf = self.font_body.render(f"유전: {mut_str} ({ds['generation']}세대)", True, mut_color)
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 30
+
+            text_surf = self.font_body.render(f"크기 (Size): {ds['size']:.2f}", True, (150, 150, 150))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 20
+            text_surf = self.font_body.render(f"속도 (Speed): {ds['speed']:.2f}", True, (150, 150, 150))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 20
+            text_surf = self.font_body.render(f"대사량 (Meta): {ds['meta']:.2f}", True, (150, 150, 150))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 20
+            text_surf = self.font_body.render(f"털 밀도 (Fur): {ds['fur']:.2f}", True, (200, 200, 200))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 20
+            aquatic_pct = int(ds['aquatic'] * 100)
+            text_surf = self.font_body.render(f"친수성: {aquatic_pct}%", True, (80, 120, 255) if ds['aquatic'] >= 0.5 else (180, 140, 80))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 20
+            text_surf = self.font_body.render(f"호기심: {int(ds['curiosity']*100)}%", True, (255, 200, 50))
+            screen.blit(text_surf, (margin, y_offset))
+            y_offset += 20
                 
         else:
             text_surf = self.font_title.render("관찰자 모드", True, (200, 200, 200))
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 40
-            text_surf = self.font_body.render("개체를 클릭하여 상세 확인", True, (150, 150, 150))
+            text_surf = self.font_body.render("개체 또는 로그 클릭하여 상세 확인", True, (150, 150, 150))
             screen.blit(text_surf, (margin, y_offset))
             y_offset += 20
             text_surf = self.font_body.render("마우스 휠: 확대/축소", True, (150, 150, 150))
@@ -180,6 +240,7 @@ class InspectorUI:
             y_offset += 20
             text_surf = self.font_body.render("우클릭 & 드래그: 맵 이동", True, (150, 150, 150))
             screen.blit(text_surf, (margin, y_offset))
+
 
         # 하단 로그 패널 (줄바꿈 및 스크롤 지원)
         log_y_start = self.screen_height // 2 + 20
